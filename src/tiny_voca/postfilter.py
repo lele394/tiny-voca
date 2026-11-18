@@ -11,6 +11,9 @@ Two measured defects are addressed:
   the noise branch keeps running in pauses.  A minimum-statistics spectral
   subtraction stage removes about 13 dB of it while leaving speech essentially
   untouched.
+* **Thin low-mid body** (optional, ``warm``): the human reference has 3-4 dB
+  more 300-1000 Hz energy.  A broad 180-700 Hz augmentation restores some of
+  it without changing the harmonic structure.
 
 Everything is plain STFT magnitude filtering (no neural networks).  The
 default preset is conservative; ``neutral`` only high-passes and limits.
@@ -87,17 +90,28 @@ def _peak(freq, center, q, gain_db):
     return 20 * np.log10(np.maximum(np.abs(num / den), 1e-9))
 
 
-def tone_gain(voice, kind, n_freq=N_FFT // 2 + 1):
+def body_gain(freq, amount):
+    """Broad 180-700 Hz body augmentation (dB at the 380 Hz peak)."""
+    if amount <= 0:
+        return np.zeros_like(freq)
+    return (_peak(freq, 180, 0.7, 0.35 * amount)
+            + _peak(freq, 380, 0.6, amount)
+            + _peak(freq, 700, 0.7, 0.40 * amount))
+
+
+def tone_gain(voice, kind, n_freq=N_FFT // 2 + 1, body=0.0):
     """Spectral gain in dB for one frame class.
 
-    ``kind`` is ``voiced``, ``unvoiced`` or ``silence``.  Values come from the
-    per-phoneme held-out measurements in postproc/REPORT.md; they are kept
-    inside +/-4 dB so the correction cannot dominate the original timbre.
+    ``kind`` is ``voiced``, ``unvoiced`` or ``silence``.  The values come from
+    the per-phoneme measurements in postproc/REPORT.md; ``body`` adds a broad
+    low-mid augmentation (the human reference has more 300-1000 Hz energy than
+    the vocoder).  Total gain is kept inside +/-5 dB.
     """
     freq = np.fft.rfftfreq((n_freq - 1) * 2, 1 / SAMPLE_RATE)
     if voice == "F2":
         if kind == "voiced":
             gain = _shelf_low(freq, 300, -2.8) + _peak(freq, 3800, 1.0, 2.2)
+            gain += body_gain(freq, body)
         elif kind == "unvoiced":
             gain = _shelf_low(freq, 350, -3.6) + _peak(freq, 3200, 1.1, 0.5)
         else:
@@ -105,6 +119,7 @@ def tone_gain(voice, kind, n_freq=N_FFT // 2 + 1):
     elif voice == "M2":
         if kind == "voiced":
             gain = _shelf_low(freq, 300, -0.5) + _shelf_high(freq, 6000, 1.0)
+            gain += body_gain(freq, body)
         elif kind == "unvoiced":
             gain = _shelf_low(freq, 300, -1.2) + _shelf_high(freq, 4000, 0.2)
         else:
@@ -112,7 +127,7 @@ def tone_gain(voice, kind, n_freq=N_FFT // 2 + 1):
     else:
         gain = np.zeros(n_freq)
     gain[freq < 60] = 0.0
-    return np.clip(gain, -4.0, 4.0)
+    return np.clip(gain, -5.0, 5.0)
 
 
 # --------------------------------------------------------------------- vad
@@ -156,7 +171,7 @@ def _smooth_freq(gain, width=5):
     return np.apply_along_axis(lambda v: np.convolve(v, kernel, mode="valid"), 1, padded)
 
 
-def dehiss_gain(power, level, strength=1.0, floor_db=-14.0, width=5):
+def dehiss_gain(power, level, strength=1.0, floor_db=-14.0, smooth_t=3, smooth_f=7):
     """Minimum-statistics spectral subtraction, gated to quiet frames.
 
     The noise power is the mean spectrum of the quietest fifth of the frames,
@@ -177,8 +192,8 @@ def dehiss_gain(power, level, strength=1.0, floor_db=-14.0, width=5):
         noise = np.percentile(power, 10, axis=0) * 6.0
     gain = np.maximum(power - (0.25 + strength) * noise, 0.0) / (power + 1e-12)
     gain = np.maximum(gain, 10 ** (floor_db / 10))
-    gain = _smooth_time(gain, 3)
-    gain = _smooth_freq(gain, width)
+    gain = _smooth_time(gain, smooth_t)
+    gain = _smooth_freq(gain, smooth_f)
     gate = np.clip((-35.0 - level) / 12.0, 0.0, 1.0)[:, None]
     return 1.0 - gate * (1.0 - gain)
 
@@ -197,13 +212,14 @@ def normalize_rms(x, target_db=-20.0):
 
 # --------------------------------------------------------------------- public
 PRESETS = {
-    "neutral": {"tone": False, "dehiss": 0.0},
-    "clean": {"tone": True, "dehiss": 1.0},
-    "strong": {"tone": True, "dehiss": 1.8},
+    "neutral": {"tone": False, "dehiss": 0.0, "body": 0.0, "floor": -14.0, "smooth": (5, 7)},
+    "clean": {"tone": True, "dehiss": 1.0, "body": 0.0, "floor": -14.0, "smooth": (3, 5)},
+    "warm": {"tone": True, "dehiss": 1.0, "body": 3.5, "floor": -10.0, "smooth": (5, 7)},
+    "strong": {"tone": True, "dehiss": 1.8, "body": 0.0, "floor": -12.0, "smooth": (5, 7)},
 }
 
 
-def process(wave, voice=None, preset="clean", tone=None, dehiss=None,
+def process(wave, voice=None, preset="clean", tone=None, dehiss=None, body=None,
             peak=0.99, target_rms=None):
     """Filter a float waveform (numpy array or torch tensor).
 
@@ -222,6 +238,10 @@ def process(wave, voice=None, preset="clean", tone=None, dehiss=None,
     tone = config["tone"] if tone is None else tone
     dehiss = config["dehiss"] if dehiss is None else dehiss
     dehiss = float(np.clip(dehiss, 0.0, 3.0))
+    body = config["body"] if body is None else body
+    body = float(np.clip(body, 0.0, 5.0))
+    floor_db = config["floor"]
+    smooth_t, smooth_f = config["smooth"]
 
     x = np.asarray(wave, dtype=np.float64).reshape(-1)
     if len(x) < N_FFT:
@@ -236,7 +256,7 @@ def process(wave, voice=None, preset="clean", tone=None, dehiss=None,
 
     gain_db = np.zeros((spectrum.shape[0], spectrum.shape[1]))
     if tone and voice is not None:
-        gv = tone_gain(voice, "voiced", spectrum.shape[1])
+        gv = tone_gain(voice, "voiced", spectrum.shape[1], body=body)
         gu = tone_gain(voice, "unvoiced", spectrum.shape[1])
         gs = tone_gain(voice, "silence", spectrum.shape[1])
         gain_db = (voiced[:, None] * gv + unvoiced[:, None] * gu + silence[:, None] * gs)
@@ -244,7 +264,8 @@ def process(wave, voice=None, preset="clean", tone=None, dehiss=None,
 
     magnitude = 10 ** (gain_db / 20.0)
     if dehiss:
-        magnitude *= np.sqrt(dehiss_gain(power, level, dehiss))
+        magnitude *= np.sqrt(dehiss_gain(power, level, dehiss, floor_db=floor_db,
+                                          smooth_t=smooth_t, smooth_f=smooth_f))
     # 2nd-order zero-phase high-pass at 55 Hz: removes sub-bass rumble without
     # touching the lowest voice harmonics (F0 >= 50 Hz is protected by the
     # gentle 12 dB/oct rolloff).
@@ -280,13 +301,14 @@ def main():
     parser.add_argument("--voice", choices=("F2", "M2"), help="Voice of the clip (tone curve)")
     parser.add_argument("--preset", choices=tuple(PRESETS), default="clean")
     parser.add_argument("--dehiss", type=float, help="0..2: spectral subtraction strength")
+    parser.add_argument("--body", type=float, help="dB of 180-700 Hz body augmentation (0..5)")
     parser.add_argument("--no-tone", action="store_true", help="Skip the tone EQ")
     parser.add_argument("--target-rms", type=float, help="Normalise to this dBFS RMS")
     parser.add_argument("--peak", type=float, default=0.99)
     args = parser.parse_args()
     y = process_file(args.input, args.output, voice=args.voice, preset=args.preset,
                      tone=False if args.no_tone else None, dehiss=args.dehiss,
-                     target_rms=args.target_rms, peak=args.peak)
+                     body=args.body, target_rms=args.target_rms, peak=args.peak)
     print(f"wrote {args.output} ({len(y)/SAMPLE_RATE:.2f}s, peak {np.max(np.abs(y)):.3f})")
 
 

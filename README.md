@@ -52,11 +52,19 @@ WAV. In Python, `tiny_voca.infer.speak_text` does the same.
 
 `--postfilter clean` runs an inference-only spectral filter: a gentle
 voice-specific tone correction, a de-hiss stage for pauses, a 55 Hz high-pass
-and a true-peak limiter. `neutral` only high-passes and limits, `strong`
-removes more noise. It can also be applied to an existing 24 kHz file:
+and a true-peak limiter. Presets are `neutral` (high-pass + limiter only),
+`clean`, `warm` (adds a measured 180-700 Hz body boost) and `strong`
+(more noise removal). It can also be applied to an existing 24 kHz file:
 
 ```bash
 python -m tiny_voca.postfilter --input raw.wav --output clean.wav --voice F2 --preset clean
+```
+
+For a less dry, more "recorded" result, `tiny_voca.humanize` adds a quiet room
+tone, sparse early reflections, occasional breaths and a gentle slow expander:
+
+```bash
+python -m tiny_voca.humanize --input raw.wav --output human.wav --voice F2 --preset human
 ```
 
 The filter was tuned on the validation targets. It removes about 13 dB of

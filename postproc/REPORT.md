@@ -288,7 +288,76 @@ wav, phones = speak_text(model, text, "F2", postfilter="clean")
 For F2, add `pitch_shift=0.07` to `speak_text` (or `--pitch-shift 0.07` on the
 CLI) to match the target pitch distribution.
 
-## 5. Limits
+## 5. Spectrum augmentation and the human layer
+
+Listening feedback after the first pass: the filtered voice was a little thin
+in the low end and could still crackle. The measurements agree with both.
+
+### 5.1 Body: the model is thin in 300-1000 Hz
+
+Compared with the human reference, the model has much less of the low-mid
+"body" and more 1-3 kHz:
+
+| band | stock | `clean` | `human` | human reference |
+|---|---:|---:|---:|---:|
+| 200-300 Hz | 16.9% | 13.2% | 12.0% | 5.7% |
+| 300-500 Hz | 21.2% | 18.7% | 24.2% | 29.4% |
+| 500-1000 Hz | 38.3% | 40.2% | 46.1% | 52.2% |
+| 1000-3000 Hz | 19.6% | 23.1% | 15.4% | 5.2% |
+| quiet floor | −71.8 dBFS | −85.5 dBFS | −57.9 dBFS | −56.7 dBFS |
+| active p10-p90 | 18.7 dB | 18.3 dB | 22.3 dB | 22.0 dB |
+
+The `clean` correction moved *away* from the human body balance because it was
+tuned to the Qwen target, which is itself thin. The new **`warm`** preset adds
+a broad 180-700 Hz augmentation (+3.5 dB at 380 Hz, +1.2 dB at 180 Hz and +1.4 dB at 700 Hz).
+
+| variant | 300-500 Hz | 500-1000 Hz | STOI vs stock | peak |
+|---|---:|---:|---:|---:|
+| `clean` | 18.7% | 40.2% | 0.999 | 0.92 |
+| `warm` (+2.8 dB) | 23.6% | 41.4% | 0.997 | 0.99 |
+| `warm` (+3.5 dB, shipped) | 24.8% | 41.5% | 0.997 | 0.99 |
+| `warm` (+4.0 dB) | 25.7% | 41.5% | 0.996 | 0.99 |
+
+The shipped `warm` amount is +3.5 dB. A phase-locked **sub-octave** experiment
+did not add measurable 120-200 Hz energy and lowered STOI to 0.958-0.974, so it
+is not shipped.
+
+### 5.2 Crackle: hard subtraction leaves musical noise
+
+The first de-hiss revision measured a quiet-frame spectral kurtosis of 49.5
+(a good proxy for isolated "musical" peaks), versus 38.5 for the stock. The
+final noise estimator (mean of the quietest fifth of frames instead of a raw
+percentile) plus wider gain smoothing brings it down to 28.5 for `clean` and
+`warm`, and 34.1 for `human`:
+
+| | stock | `clean` (old) | `clean`/`warm` (final) | `human` |
+|---|---:|---:|---:|---:|
+| quiet spectral kurtosis | 38.5 | 49.5 | 28.5 | 34.1 |
+| |d²| p99.99 | 11.04 | 11.07 | 10.94 | 10.16 |
+
+`warm`/`human` use a 5-frame / 7-bin gain smoothing and a −10 dB floor; `clean`
+keeps 3/5 and a −14 dB floor. The room tone in the `human` layer also masks
+what is left. Comparison files are 24-bit for the processed versions; 16-bit
+output should be dithered (`--subtype PCM_16` does TPDF dither).
+
+### 5.3 The human layer
+
+`src/tiny_voca/humanize.py` adds three non-neural cues on top of `warm`:
+
+1. **Room tone** — pink noise at about −60 dBFS plus sparse early reflections
+   (3-31 ms, no long reverb). This is the biggest perceptual change: human
+   recordings are around −57 dBFS, while even the stock model is −72 and the
+   clean filter is −85 (too dead).
+2. **Breaths** — a band-limited, Hann-windowed noise burst inside long pauses,
+   about −33 dB below speech, at 55% probability. It does not change duration.
+3. **Slow expander** — attenuates quiet speech by up to ~1.5 dB over 40 ms
+   smoothing, raising active p10-p90 from 18.7 to 22.3 dB (human: 22.0).
+
+Result on the comparison clip: quiet floor −57.9 dBFS, speech level unchanged,
+STOI 0.98 versus stock. The body EQ and room tone are the two changes most
+likely to read as "more human"; the breaths are deliberately sparse.
+
+## 6. Limits
 
 * The filter is **not a denoiser for arbitrary recordings**; it is tuned to the
   vocoder's own noise branch and to 24 kHz tiny-voca output.
@@ -296,10 +365,10 @@ CLI) to match the target pitch distribution.
   cannot fix prosody, timing or pronunciation.
 * The tone curves were tuned on 32 validation clips. The per-clip spread is
   larger than the correction, so expect a subtle change, not a transformation.
-* No listening test was performed here; the evaluation is objective. Listen to
-  `assets/tiny_voca_stock.wav` and `assets/tiny_voca_filtered.wav`.
+* No formal listening test was performed here; the evaluation is objective.
+  Listen to `assets/tiny_voca_{stock,filtered,warm,human}.wav`.
 
-## 6. Files
+## 7. Files
 
 The intermediate `data/` and `refs/` directories were removed after the study;
 the commands in section 1 regenerate them.
@@ -316,5 +385,7 @@ the commands in section 1 regenerate them.
 | `postproc/vocoder_probe.py` | harmonic/noise branch levels and per-frame cepstra |
 | `postproc/evaluate_filter.py` | apply the final filter and report |
 | `postproc/figures.py` | report figures |
-| `src/tiny_voca/postfilter.py` | the shipped filter |
-| `tests/test_postfilter.py` | unit tests |
+| `src/tiny_voca/postfilter.py` | the shipped spectral filter |
+| `src/tiny_voca/humanize.py` | room/breath/dynamics layer |
+| `tests/test_postfilter.py` | filter unit tests |
+| `tests/test_humanize.py` | humanize unit tests |
