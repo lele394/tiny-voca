@@ -27,6 +27,7 @@ tiny-voca-annotate = "tiny_voca.annotate:main"
 tiny-voca-train = "tiny_voca.train:main"
 tiny-voca-evaluate = "tiny_voca.evaluate:main"
 tiny-voca-speak = "tiny_voca.infer:main"
+tiny-voca-postfilter = "tiny_voca.postfilter:main"
 tiny-voca-inspect = "tiny_voca.inspect:main"
 
 [tool.setuptools.packages.find]

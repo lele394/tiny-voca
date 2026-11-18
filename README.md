@@ -40,12 +40,30 @@ python -m tiny_voca.infer \
 | `--speed` | 1.0 | Speaking rate |
 | `--pitch-shift` | 0 | Raise or lower the pitch |
 | `--pitch-range` | 1.0 | More or less pitch movement |
+| `--postfilter` | `off` | `off`, `neutral`, `clean` or `strong` (see below) |
 
 Long text is fine. It is read one sentence at a time and the audio is joined.
 A text that ends without a mark gets a full stop, so the last word does not
 break off. A sentence with nothing to read, such as one in another script, is
 skipped. The output never peaks above 0.99, so it does not clip as a 16-bit
 WAV. In Python, `tiny_voca.infer.speak_text` does the same.
+
+## Post-processing
+
+`--postfilter clean` runs an inference-only spectral filter: a gentle
+voice-specific tone correction, a de-hiss stage for pauses, a 55 Hz high-pass
+and a true-peak limiter. `neutral` only high-passes and limits, `strong`
+removes more noise. It can also be applied to an existing 24 kHz file:
+
+```bash
+python -m tiny_voca.postfilter --input raw.wav --output clean.wav --voice F2 --preset clean
+```
+
+The filter was tuned on the validation targets. It removes about 13 dB of
+pause hiss and corrects the measured F2 low-mid / presence bias, but it cannot
+fix prosody or timing. For F2, `--pitch-shift 0.07` brings the F0 distribution
+closer to the target. The measurements, negative results and limitations are in
+[postproc/REPORT.md](postproc/REPORT.md).
 
 ## ONNX
 
