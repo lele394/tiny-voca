@@ -314,7 +314,7 @@ def process(wave, voice=None, preset="clean", tone=None, dehiss=None, body=None,
     return limit_peak(y, peak)
 
 
-def process_file(source, output, voice=None, preset="clean", **kwargs):
+def process_file(source, output, voice=None, preset="clean", subtype="FLOAT", seed=0, **kwargs):
     import soundfile as sf
     x, sr = sf.read(source, dtype="float64", always_2d=False)
     if sr != SAMPLE_RATE:
@@ -322,9 +322,12 @@ def process_file(source, output, voice=None, preset="clean", **kwargs):
     if x.ndim > 1:
         x = x.mean(axis=1)
     y = process(x, voice=voice, preset=preset, **kwargs)
+    if subtype == "PCM_16":
+        rng = np.random.default_rng(seed)
+        y = y + (rng.random(len(y)) - rng.random(len(y))) / 32768.0
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    sf.write(output, y, SAMPLE_RATE, subtype="FLOAT")
+    sf.write(output, y, SAMPLE_RATE, subtype=subtype)
     return y
 
 
@@ -340,11 +343,12 @@ def main():
     parser.add_argument("--no-tone", action="store_true", help="Skip the tone EQ")
     parser.add_argument("--target-rms", type=float, help="Normalise to this dBFS RMS")
     parser.add_argument("--peak", type=float, default=0.99)
+    parser.add_argument("--subtype", choices=("FLOAT", "PCM_24", "PCM_16"), default="FLOAT")
     args = parser.parse_args()
     y = process_file(args.input, args.output, voice=args.voice, preset=args.preset,
                      tone=False if args.no_tone else None, dehiss=args.dehiss,
                      body=args.body, contrast=args.contrast,
-                     target_rms=args.target_rms, peak=args.peak)
+                     target_rms=args.target_rms, peak=args.peak, subtype=args.subtype)
     print(f"wrote {args.output} ({len(y)/SAMPLE_RATE:.2f}s, peak {np.max(np.abs(y)):.3f})")
 
 
