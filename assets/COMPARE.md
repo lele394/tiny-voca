@@ -53,3 +53,22 @@ and targets the top-octave sizzle.
 | human reference | 0.50 | 0.36 | — |
 
 See `postproc/HF_SYNTH.md` for the method and caveats.
+
+## Natural chain (branch)
+
+The composed chain adds F2 pitch calibration, HF harmonic rebuild, a mild
+formant warp, band-limited shimmer, breaths and a low-passed room bed.
+
+| file | floor | p10-p90 | HF flat 4-8k | HF flat 8-12k | STOI |
+|---|---:|---:|---:|---:|---:|
+| `tiny_voca_stock.wav` | −71.8 | 18.7 | 0.700 | 0.654 | — |
+| `tiny_voca_natural.wav` | −58.1 | 21.4 | 0.54 | 0.41 | 0.988 |
+| `tiny_voca_natural_soft.wav` | −59.4 | 21.1 | 0.54 | 0.41 | 0.992 |
+| `tiny_voca_natural_formant.wav` | −58.2 | 21.6 | 0.56 | 0.37 | 0.985 |
+| `tiny_voca_natural_dry.wav` | −85.9 | 21.2 | 0.54 | 0.40 | 0.999 |
+| `tiny_voca_natural_nopitch.wav` | −58.1 | 21.4 | 0.54 | 0.41 | — |
+| human reference | −56.7 | 22.0 | 0.50 | 0.36 | — |
+
+`natural.wav` is the main result. All processed files are 24-bit and
+RMS-matched to −18.5 dBFS; `natural_nopitch.wav` isolates the chain from the
+F2 `pitch_shift=0.07` calibration.

@@ -75,8 +75,10 @@ closer to the target. The measurements, negative results and limitations are in
 [postproc/REPORT.md](postproc/REPORT.md).
 
 On the `hf-harmonic-formant-synth` branch, `tiny-voca-hfsynth` is an
-experimental 7-12 kHz harmonic/formant rebuild; see
-[postproc/HF_SYNTH.md](postproc/HF_SYNTH.md).
+experimental 7-12 kHz harmonic/formant rebuild, and `tiny-voca-naturalize`
+composes pitch calibration, HF synthesis, formant warp, shimmer and room into
+one naturalness chain. See [postproc/HF_SYNTH.md](postproc/HF_SYNTH.md) and
+[postproc/NATURAL.md](postproc/NATURAL.md).
 
 ## ONNX
 
