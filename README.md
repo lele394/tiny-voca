@@ -137,12 +137,14 @@ Languages and voices:
 - [apptor-tiny-tts](https://huggingface.co/apptor/apptor-tiny-tts): German.
 - [tiny-voca-it](https://github.com/carbogninalberto/tiny-voca-it): Italian.
 - [zerre-tts](https://github.com/erkinemreta1/zerre-tts): Turkish.
+- [clarvia-tts-tiny](https://huggingface.co/wite-tech/clarvia-tts-tiny): Turkish, ten voices, with its own [phonemizer](https://huggingface.co/wite-tech/clarvia-phonemizer) for numbers, dates and money.
 - [korean-tts](https://github.com/ooodev/korean-tts): Korean, and Korean mixed with English.
 - [slyszeglosy](https://github.com/damaon/slyszeglosy): Polish.
 - [mini-voz](https://github.com/ElMariones/mini-voz): Spanish, with a Castilian accent.
 - [tiny-voca-es](https://github.com/stdevMac/tiny-voca): Spanish from Spain, with a browser demo.
 - [tiny-voca-fr](https://github.com/DanielSuncost/tiny-voca-fr): French, with a browser demo.
 - [tiny-voca-ptbr](https://github.com/SemFence/tiny-voca-ptbr): Brazilian Portuguese, with its own phonemizer.
+- [tiny-voca-ptbr-kokoro](https://github.com/Haple/tiny-voca-ptbr-kokoro): Brazilian Portuguese, with Kokoro's Brazilian voices as the teacher.
 - [tiny-voca Arabic](https://github.com/BenkadourKhaled/tiny-voca/tree/arabic-halabi-f2): Modern Standard Arabic, trained on a CPU from the Arabic Speech Corpus.
 - [Bengali Voice](https://tts.hansda.in/): Bengali script and Romanized Bengali, with a browser demo.
 - [alpa](https://huggingface.co/77ethers/alpa): Sanskrit, fine-tuned from tiny-voca on a CPU.
