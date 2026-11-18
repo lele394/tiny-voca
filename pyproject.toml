@@ -29,6 +29,7 @@ tiny-voca-evaluate = "tiny_voca.evaluate:main"
 tiny-voca-speak = "tiny_voca.infer:main"
 tiny-voca-postfilter = "tiny_voca.postfilter:main"
 tiny-voca-humanize = "tiny_voca.humanize:main"
+tiny-voca-hfsynth = "tiny_voca.hf_synth:main"
 tiny-voca-inspect = "tiny_voca.inspect:main"
 
 [tool.setuptools.packages.find]

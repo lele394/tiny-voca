@@ -74,6 +74,10 @@ prosody or timing. For F2, `--pitch-shift 0.07` brings the F0 distribution
 closer to the target. The measurements, negative results and limitations are in
 [postproc/REPORT.md](postproc/REPORT.md).
 
+On the `hf-harmonic-formant-synth` branch, `tiny-voca-hfsynth` is an
+experimental 7-12 kHz harmonic/formant rebuild; see
+[postproc/HF_SYNTH.md](postproc/HF_SYNTH.md).
+
 ## ONNX
 
 ```bash

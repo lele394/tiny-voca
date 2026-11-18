@@ -35,3 +35,21 @@ python -m tiny_voca.humanize  --input stock.wav --output human.wav      --voice 
 ```
 
 `humanize` writes 24-bit by default; `--subtype PCM_16` adds TPDF dither.
+
+
+## Experimental branch: HF harmonic/formant resynthesis
+
+On the `hf-harmonic-formant-synth` branch, `tiny-voca-hfsynth` rebuilds the
+7-12 kHz magnitude from an F0-guided harmonic model. It leaves 4-8 kHz alone
+and targets the top-octave sizzle.
+
+| file | HF flat 4-8k | HF flat 8-12k | STOI vs warm |
+|---|---:|---:|---:|
+| `tiny_voca_warm.wav` (F2) | 0.532 | 0.493 | 1.000 |
+| `tiny_voca_hfsynth.wav` (F2) | 0.534 | **0.378** | 1.000 |
+| `tiny_voca_hfsynth_strong.wav` (F2) | 0.531 | **0.326** | 1.000 |
+| `tiny_voca_warm_m2.wav` (M2) | 0.574 | 0.495 | 1.000 |
+| `tiny_voca_hfsynth_m2.wav` (M2) | 0.577 | **0.382** | 1.000 |
+| human reference | 0.50 | 0.36 | — |
+
+See `postproc/HF_SYNTH.md` for the method and caveats.
