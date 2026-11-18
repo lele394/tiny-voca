@@ -40,7 +40,7 @@ python -m tiny_voca.infer \
 | `--speed` | 1.0 | Speaking rate |
 | `--pitch-shift` | 0 | Raise or lower the pitch |
 | `--pitch-range` | 1.0 | More or less pitch movement |
-| `--postfilter` | `off` | `off`, `neutral`, `clean` or `strong` (see below) |
+| `--postfilter` | `off` | `off`, `neutral`, `smooth`, `clean`, `warm` or `strong` (see below) |
 
 Long text is fine. It is read one sentence at a time and the audio is joined.
 A text that ends without a mark gets a full stop, so the last word does not
@@ -53,8 +53,8 @@ WAV. In Python, `tiny_voca.infer.speak_text` does the same.
 `--postfilter clean` runs an inference-only spectral filter: a gentle
 voice-specific tone correction, a de-hiss stage for pauses, a 55 Hz high-pass
 and a true-peak limiter. Presets are `neutral` (high-pass + limiter only),
-`clean`, `warm` (adds a measured 180-700 Hz body boost) and `strong`
-(more noise removal). It can also be applied to an existing 24 kHz file:
+`smooth` (HF de-sizzle), `clean`, `warm` (adds a measured 180-700 Hz body
+boost) and `strong` (more noise removal). It can also be applied to an existing 24 kHz file:
 
 ```bash
 python -m tiny_voca.postfilter --input raw.wav --output clean.wav --voice F2 --preset clean
@@ -67,9 +67,10 @@ tone, sparse early reflections, occasional breaths and a gentle slow expander:
 python -m tiny_voca.humanize --input raw.wav --output human.wav --voice F2 --preset human
 ```
 
-The filter was tuned on the validation targets. It removes about 13 dB of
-pause hiss and corrects the measured F2 low-mid / presence bias, but it cannot
-fix prosody or timing. For F2, `--pitch-shift 0.07` brings the F0 distribution
+The filter was tuned on the validation targets. `smooth`/`warm` also raise
+high-frequency spectral contrast (`--contrast`, default 1.5) to remove the
+broadband HF sizzle the model inherits from its target. The filter cannot fix
+prosody or timing. For F2, `--pitch-shift 0.07` brings the F0 distribution
 closer to the target. The measurements, negative results and limitations are in
 [postproc/REPORT.md](postproc/REPORT.md).
 

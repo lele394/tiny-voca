@@ -48,6 +48,18 @@ class PostfilterTest(unittest.TestCase):
         self.assertLess(float(f2[np.argmin(abs(freq - 100))]), 0.0)
         self.assertGreater(float(f2[np.argmin(abs(freq - 3800))]), 0.0)
 
+    def test_contrast_preserves_band_energy_and_shapes_peaks(self):
+        mag = np.ones((4, postfilter.N_FFT // 2 + 1))
+        mag[:, 200] = 10.0
+        level = np.full(4, -20.0)
+        gain = postfilter.hf_contrast_gain(mag, level, gamma=2.0)
+        self.assertGreater(float(gain[0, 200]), 1.0)
+        self.assertLess(float(gain[0, 201]), 1.0)
+        out = mag * gain
+        f = np.fft.rfftfreq(postfilter.N_FFT, 1 / self.sr)
+        hf = f >= 3500
+        np.testing.assert_allclose(out[:, hf].sum(axis=1), mag[:, hf].sum(axis=1), rtol=0.05)
+
     def test_peak_limit(self):
         x = np.ones(self.sr) * 2.0
         y = postfilter.process(x, voice=None, preset="neutral", tone=False, dehiss=0)

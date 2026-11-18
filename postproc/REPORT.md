@@ -291,7 +291,8 @@ CLI) to match the target pitch distribution.
 ## 5. Spectrum augmentation and the human layer
 
 Listening feedback after the first pass: the filtered voice was a little thin
-in the low end and could still crackle. The measurements agree with both.
+in the low end, could still crackle, and had a high-frequency "sizzle". The
+measurements agree with all three.
 
 ### 5.1 Body: the model is thin in 300-1000 Hz
 
@@ -300,12 +301,12 @@ Compared with the human reference, the model has much less of the low-mid
 
 | band | stock | `clean` | `human` | human reference |
 |---|---:|---:|---:|---:|
-| 200-300 Hz | 16.9% | 13.2% | 12.0% | 5.7% |
+| 200-300 Hz | 16.9% | 13.2% | 12.3% | 5.7% |
 | 300-500 Hz | 21.2% | 18.7% | 24.2% | 29.4% |
-| 500-1000 Hz | 38.3% | 40.2% | 46.1% | 52.2% |
+| 500-1000 Hz | 38.3% | 40.2% | 45.4% | 52.2% |
 | 1000-3000 Hz | 19.6% | 23.1% | 15.4% | 5.2% |
-| quiet floor | −71.8 dBFS | −85.5 dBFS | −57.9 dBFS | −56.7 dBFS |
-| active p10-p90 | 18.7 dB | 18.3 dB | 22.3 dB | 22.0 dB |
+| quiet floor | −71.8 dBFS | −85.5 dBFS | −58.9 dBFS | −56.7 dBFS |
+| active p10-p90 | 18.7 dB | 18.3 dB | 21.2 dB | 22.0 dB |
 
 The `clean` correction moved *away* from the human body balance because it was
 tuned to the Qwen target, which is itself thin. The new **`warm`** preset adds
@@ -328,12 +329,13 @@ The first de-hiss revision measured a quiet-frame spectral kurtosis of 49.5
 (a good proxy for isolated "musical" peaks), versus 38.5 for the stock. The
 final noise estimator (mean of the quietest fifth of frames instead of a raw
 percentile) plus wider gain smoothing brings it down to 28.5 for `clean` and
-`warm`, and 34.1 for `human`:
+`warm`. The `human` room bed is deliberately low-frequency heavy, so its
+cross-frequency kurtosis is higher (40.6) even though the HF floor is clean:
 
 | | stock | `clean` (old) | `clean`/`warm` (final) | `human` |
 |---|---:|---:|---:|---:|
-| quiet spectral kurtosis | 38.5 | 49.5 | 28.5 | 34.1 |
-| |d²| p99.99 | 11.04 | 11.07 | 10.94 | 10.16 |
+| quiet spectral kurtosis | 38.5 | 49.5 | 28.5 | 40.6 |
+| |d²| p99.99 | 11.04 | 11.07 | 10.94 | 10.33 |
 
 `warm`/`human` use a 5-frame / 7-bin gain smoothing and a −10 dB floor; `clean`
 keeps 3/5 and a −14 dB floor. The room tone in the `human` layer also masks
@@ -344,18 +346,49 @@ output should be dithered (`--subtype PCM_16` does TPDF dither).
 
 `src/tiny_voca/humanize.py` adds three non-neural cues on top of `warm`:
 
-1. **Room tone** — pink noise at about −60 dBFS plus sparse early reflections
-   (3-31 ms, no long reverb). This is the biggest perceptual change: human
-   recordings are around −57 dBFS, while even the stock model is −72 and the
-   clean filter is −85 (too dead).
+1. **Room tone** — warm 1/f^0.65 noise, low-passed at 3 kHz, at about −58 dBFS,
+   plus sparse early reflections (3-31 ms, no long reverb). This is the biggest
+   perceptual change: human recordings are around −57 dBFS, while even the
+   stock model is −72 and the clean filter is −85 (too dead).
 2. **Breaths** — a band-limited, Hann-windowed noise burst inside long pauses,
    about −33 dB below speech, at 55% probability. It does not change duration.
 3. **Slow expander** — attenuates quiet speech by up to ~1.5 dB over 40 ms
-   smoothing, raising active p10-p90 from 18.7 to 22.3 dB (human: 22.0).
+   smoothing, raising active p10-p90 from 18.7 to 21.2 dB (human: 22.0).
 
-Result on the comparison clip: quiet floor −57.9 dBFS, speech level unchanged,
-STOI 0.98 versus stock. The body EQ and room tone are the two changes most
+Result on the comparison clip: quiet floor −58.9 dBFS, speech level unchanged,
+STOI 0.979 versus stock (processed files are loudness-matched to the stock RMS). The body EQ and room tone are the two changes most
 likely to read as "more human"; the breaths are deliberately sparse.
+
+### 5.4 HF sizzle: inherited from the target
+
+The high-frequency flatness and inter-harmonic level show that the sizzle is
+**already in the Qwen target**, not added by tiny-voca:
+
+| measure | Qwen target | tiny-voca | human reference |
+|---|---:|---:|---:|
+| HF flatness, 4-8 kHz | 0.717 | 0.70-0.73 | 0.50 |
+| HF flatness, 8-12 kHz | 0.667 | 0.65-0.68 | 0.36 |
+| inter-harmonic level, 4-8 kHz | −25.6 dB | −25 to −26 dB | −29.6 dB |
+
+Cutting treble will not fix this: the model actually has *less* HF energy than
+human speech. The fix is **spectral contrast**: per frame, raise the HF
+magnitude to a power γ and renormalise to the original HF band energy. This
+preserves the LTAS and HF level but makes harmonics/formants stand out above
+the broadband noise.
+
+| γ | flat 4-8k | flat 8-12k | inter-harm | STOI | preset |
+|---:|---:|---:|---:|---:|---|
+| 1.0 | 0.685 | 0.653 | −26.0 | 0.999 | `clean` |
+| 1.5 | 0.535 | 0.495 | −29.9 | 0.996 | `smooth`, `warm`, `human` |
+| 2.0 | 0.407 | 0.369 | −33.9 | 0.99 | `strong`, `--contrast 2.0` |
+| 2.5 | 0.311 | 0.275 | −38.1 | 0.99 | `--contrast 2.5` |
+
+γ=1.5 lands almost exactly on the human inter-harmonic level and only mildly
+overshoots the 8-12 kHz flatness; γ=2.0 is cleaner but risks a "processed"
+texture. The `smooth` preset isolates this stage (no body boost): 0.532/0.496,
+STOI 0.999. `warm` adds the body EQ (0.532/0.493, STOI 0.996). `human` adds the
+low-passed room bed (0.551/0.507, STOI 0.979). The HF band energy is preserved,
+so this is augmentation of the *structure*, not a treble cut.
 
 ## 6. Limits
 

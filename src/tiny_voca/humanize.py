@@ -5,7 +5,8 @@ quiet floor is around -72 dBFS, while the human reference here sits around
 -57 dBFS, and its 300-1000 Hz body is 3-4 dB weaker.  This module starts from
 the ``warm`` spectral filter and adds three non-neural cues:
 
-* a synthetic room (pink tone + sparse early reflections, no long reverb);
+* a synthetic room (warm low-passed tone + sparse early reflections, no long
+  reverb);
 * occasional breath noise inside long pauses;
 * a slow expander that restores a little p10-p90 dynamic range.
 
@@ -29,8 +30,8 @@ SAMPLE_RATE = pf.SAMPLE_RATE
 
 PRESETS = {
     "subtle": {"room": 0.5, "breath": 0.4, "dynamics": 0.4},
-    "human": {"room": 0.8, "breath": 0.7, "dynamics": 0.7},
-    "lively": {"room": 1.0, "breath": 1.0, "dynamics": 1.0},
+    "human": {"room": 0.7, "breath": 0.7, "dynamics": 0.7},
+    "lively": {"room": 1.2, "breath": 1.0, "dynamics": 1.0},
 }
 
 
@@ -42,6 +43,17 @@ def pink_noise(n, rng):
     spec = (rng.standard_normal(len(f)) + 1j * rng.standard_normal(len(f))) / np.sqrt(f)
     spec *= 1 / np.sqrt(1 + (50 / f) ** 4)
     spec *= 1 / np.sqrt(1 + (f / 9000) ** 4)
+    x = np.fft.irfft(spec, n=n)
+    return x / (np.sqrt(np.mean(x ** 2)) + 1e-12)
+
+
+def room_noise(n, rng):
+    """Warm 1/f^0.65 room bed, low-passed at 3 kHz: body without HF haze."""
+    f = np.fft.rfftfreq(n, 1 / SAMPLE_RATE)
+    f[0] = f[1]
+    spec = (rng.standard_normal(len(f)) + 1j * rng.standard_normal(len(f))) / f ** 0.65
+    spec *= 1 / np.sqrt(1 + (45 / f) ** 4)
+    spec *= 1 / np.sqrt(1 + (f / 3000) ** 4)
     x = np.fft.irfft(spec, n=n)
     return x / (np.sqrt(np.mean(x ** 2)) + 1e-12)
 
@@ -135,16 +147,16 @@ def add_room(x, amount=1.0, seed=0):
     if amount <= 0:
         return x
     rng = np.random.default_rng(seed + 3)
-    # quiet room tone: -66 dBFS at amount 0.5, -60 dBFS at 1.0
-    level_db = -66.0 + 6.0 * min(amount, 1.5)
-    tone = pink_noise(len(x), rng) * 10 ** (level_db / 20) * min(amount, 1.5) ** 0.5
+    # quiet room tone: -61 dBFS at amount 0.5, -58 dBFS at 1.0
+    level_db = -64.0 + 6.0 * min(amount, 1.5)
+    tone = room_noise(len(x), rng) * 10 ** (level_db / 20) * min(amount, 1.5) ** 0.5
     wet = _convolve(x, _wet_rir(seed))[:len(x)]
     return x + tone + wet * 0.35 * amount
 
 
 # ------------------------------------------------------------------ public
 def process(wave, voice=None, preset="human", room=None, breath=None, dynamics=None,
-            seed=0, peak=0.99, base="warm"):
+            contrast=None, seed=0, peak=0.99, target_rms=None, base="warm"):
     """Clean + body augment + room/breaths/dynamics.
 
     ``wave`` is 24 kHz.  ``voice`` selects the tone curve (``"F2"`` / ``"M2"``).
@@ -158,10 +170,12 @@ def process(wave, voice=None, preset="human", room=None, breath=None, dynamics=N
     dynamics = config["dynamics"] if dynamics is None else dynamics
 
     x = pf.process(np.asarray(wave, dtype=np.float64).reshape(-1),
-                   voice=voice, preset=base, peak=1.0)
+                   voice=voice, preset=base, contrast=contrast, peak=1.0)
     x = slow_expander(x, float(np.clip(dynamics, 0, 3)))
     x = add_breaths(x, float(np.clip(breath, 0, 2)), seed)
     x = add_room(x, float(np.clip(room, 0, 2)), seed)
+    if target_rms is not None:
+        x = pf.normalize_rms(x, target_rms)
     return pf.limit_peak(x, peak)
 
 
@@ -195,13 +209,16 @@ def main():
     parser.add_argument("--room", type=float, help="0..1.5 room tone + early reflections")
     parser.add_argument("--breath", type=float, help="0..1.5 breath probability/level")
     parser.add_argument("--dynamics", type=float, help="0..2 slow expander strength")
+    parser.add_argument("--contrast", type=float, help="HF contrast gamma (1 = off, 1.5 = default)")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--peak", type=float, default=0.99)
+    parser.add_argument("--target-rms", type=float, help="Normalise to this dBFS RMS")
     parser.add_argument("--subtype", choices=("FLOAT", "PCM_24", "PCM_16"), default="PCM_24")
     args = parser.parse_args()
     y = process_file(args.input, args.output, voice=args.voice, preset=args.preset,
                      room=args.room, breath=args.breath, dynamics=args.dynamics,
-                     seed=args.seed, peak=args.peak, subtype=args.subtype)
+                     contrast=args.contrast, seed=args.seed, peak=args.peak,
+                     target_rms=args.target_rms, subtype=args.subtype)
     print(f"wrote {args.output} ({len(y)/SAMPLE_RATE:.2f}s, peak {np.max(np.abs(y)):.3f})")
 
 

@@ -14,6 +14,10 @@ Two measured defects are addressed:
 * **Thin low-mid body** (optional, ``warm``): the human reference has 3-4 dB
   more 300-1000 Hz energy.  A broad 180-700 Hz augmentation restores some of
   it without changing the harmonic structure.
+* **High-frequency sizzle** (``smooth``/``warm``/``human``): the Qwen target
+  itself has flatter HF spectra than human speech.  Raising the HF magnitude
+  to a power gamma and renormalising keeps the LTAS but restores harmonic and
+  formant contrast (``--contrast``).
 
 Everything is plain STFT magnitude filtering (no neural networks).  The
 default preset is conservative; ``neutral`` only high-passes and limits.
@@ -171,6 +175,29 @@ def _smooth_freq(gain, width=5):
     return np.apply_along_axis(lambda v: np.convolve(v, kernel, mode="valid"), 1, padded)
 
 
+def hf_contrast_gain(mag, level, gamma=2.0, start=3500.0):
+    """Per-frame power-law contrast enhancement above ``start`` Hz.
+
+    The target (and therefore the model) has flatter HF spectra than human
+    speech: broadband noise fills the valleys.  Raising the HF magnitude to
+    ``gamma`` and renormalising to the original band energy keeps the LTAS but
+    increases peak-to-valley contrast, which moves the HF texture toward human
+    (lower spectral flatness) without a treble cut.  Silence is left alone.
+    """
+    if gamma <= 1.0:
+        return np.ones_like(mag)
+    freq = np.fft.rfftfreq((mag.shape[1] - 1) * 2, 1 / SAMPLE_RATE)
+    hf = freq >= start
+    band = mag[:, hf]
+    new = band ** gamma
+    new *= (band.sum(axis=1, keepdims=True) + 1e-12) / (new.sum(axis=1, keepdims=True) + 1e-12)
+    gain = np.ones_like(mag)
+    gain[:, hf] = new / (band + 1e-12)
+    ramp = np.clip((freq - start) / 1500.0, 0.0, 1.0)[None, :]
+    active = np.clip((level + 50.0) / 10.0, 0.0, 1.0)[:, None]
+    return 1.0 - active * ramp * (1.0 - gain)
+
+
 def dehiss_gain(power, level, strength=1.0, floor_db=-14.0, smooth_t=3, smooth_f=7):
     """Minimum-statistics spectral subtraction, gated to quiet frames.
 
@@ -212,15 +239,16 @@ def normalize_rms(x, target_db=-20.0):
 
 # --------------------------------------------------------------------- public
 PRESETS = {
-    "neutral": {"tone": False, "dehiss": 0.0, "body": 0.0, "floor": -14.0, "smooth": (5, 7)},
-    "clean": {"tone": True, "dehiss": 1.0, "body": 0.0, "floor": -14.0, "smooth": (3, 5)},
-    "warm": {"tone": True, "dehiss": 1.0, "body": 3.5, "floor": -10.0, "smooth": (5, 7)},
-    "strong": {"tone": True, "dehiss": 1.8, "body": 0.0, "floor": -12.0, "smooth": (5, 7)},
+    "neutral": {"tone": False, "dehiss": 0.0, "body": 0.0, "contrast": 1.0, "floor": -14.0, "smooth": (5, 7)},
+    "clean": {"tone": True, "dehiss": 1.0, "body": 0.0, "contrast": 1.0, "floor": -14.0, "smooth": (3, 5)},
+    "smooth": {"tone": True, "dehiss": 1.0, "body": 0.0, "contrast": 1.5, "floor": -10.0, "smooth": (5, 7)},
+    "warm": {"tone": True, "dehiss": 1.0, "body": 3.5, "contrast": 1.5, "floor": -10.0, "smooth": (5, 7)},
+    "strong": {"tone": True, "dehiss": 1.8, "body": 0.0, "contrast": 2.0, "floor": -12.0, "smooth": (5, 7)},
 }
 
 
 def process(wave, voice=None, preset="clean", tone=None, dehiss=None, body=None,
-            peak=0.99, target_rms=None):
+            contrast=None, peak=0.99, target_rms=None):
     """Filter a float waveform (numpy array or torch tensor).
 
     Parameters
@@ -240,6 +268,8 @@ def process(wave, voice=None, preset="clean", tone=None, dehiss=None, body=None,
     dehiss = float(np.clip(dehiss, 0.0, 3.0))
     body = config["body"] if body is None else body
     body = float(np.clip(body, 0.0, 5.0))
+    contrast = config["contrast"] if contrast is None else contrast
+    contrast = float(np.clip(contrast, 1.0, 3.0))
     floor_db = config["floor"]
     smooth_t, smooth_f = config["smooth"]
 
@@ -266,6 +296,10 @@ def process(wave, voice=None, preset="clean", tone=None, dehiss=None, body=None,
     if dehiss:
         magnitude *= np.sqrt(dehiss_gain(power, level, dehiss, floor_db=floor_db,
                                           smooth_t=smooth_t, smooth_f=smooth_f))
+    if contrast > 1.0:
+        # contrast must be measured on the actual signal magnitude, not on the
+        # (smooth) filter curve
+        magnitude *= hf_contrast_gain(np.abs(spectrum) * magnitude, level, contrast)
     # 2nd-order zero-phase high-pass at 55 Hz: removes sub-bass rumble without
     # touching the lowest voice harmonics (F0 >= 50 Hz is protected by the
     # gentle 12 dB/oct rolloff).
@@ -302,13 +336,15 @@ def main():
     parser.add_argument("--preset", choices=tuple(PRESETS), default="clean")
     parser.add_argument("--dehiss", type=float, help="0..2: spectral subtraction strength")
     parser.add_argument("--body", type=float, help="dB of 180-700 Hz body augmentation (0..5)")
+    parser.add_argument("--contrast", type=float, help="HF spectral contrast gamma (1 = off, 2 = strong)")
     parser.add_argument("--no-tone", action="store_true", help="Skip the tone EQ")
     parser.add_argument("--target-rms", type=float, help="Normalise to this dBFS RMS")
     parser.add_argument("--peak", type=float, default=0.99)
     args = parser.parse_args()
     y = process_file(args.input, args.output, voice=args.voice, preset=args.preset,
                      tone=False if args.no_tone else None, dehiss=args.dehiss,
-                     body=args.body, target_rms=args.target_rms, peak=args.peak)
+                     body=args.body, contrast=args.contrast,
+                     target_rms=args.target_rms, peak=args.peak)
     print(f"wrote {args.output} ({len(y)/SAMPLE_RATE:.2f}s, peak {np.max(np.abs(y)):.3f})")
 
 
